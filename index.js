@@ -6,7 +6,7 @@ const fs = require('fs-extra')
 const path = require('path')
 const axios = require('axios')
 const config = require('./config')
-const { downloadCommands, loadCommands, isCommand, executeCommand } = require('./lib/helpers')
+const { downloadCommands, loadCommands, isCommand, executeCommand } = require('./lib/helper')
 
 const msgRetryCounterCache = new NodeCache()
 const logger = pino({ level: 'silent' })

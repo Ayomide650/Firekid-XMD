@@ -5,7 +5,8 @@
   "main": "index.js",
   "scripts": {
     "start": "node index.js",
-    "dev": "nodemon index.js"
+    "dev": "nodemon index.js",
+    "install-deps": "npm install"
   },
   "dependencies": {
     "@whiskeysockets/baileys": "^6.7.8",
@@ -14,12 +15,22 @@
     "pino": "^8.17.2",
     "node-cache": "^5.1.2",
     "fs-extra": "^11.2.0",
-    "dotenv": "^16.3.1"
+    "dotenv": "^16.3.1",
+    "simple-git": "^3.20.0"
   },
   "devDependencies": {
     "nodemon": "^3.0.2"
   },
   "engines": {
     "node": ">=18.0.0"
-  }
+  },
+  "keywords": [
+    "whatsapp",
+    "bot",
+    "baileys",
+    "nodejs",
+    "github-storage"
+  ],
+  "author": "Firekid",
+  "license": "MIT"
 }

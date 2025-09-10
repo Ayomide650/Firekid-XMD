@@ -231,62 +231,102 @@ async function loadCommands() {
     
     // First try to load from GitHub repo
     let commandsPath = path.join(__dirname, 'temp_commands', 'commands')
+    let usingGitHub = false
     
     try {
-        if (!await fs.pathExists(commandsPath)) {
-            console.log('GitHub commands not found, trying local commands directory...')
+        // Check if GitHub download was successful
+        if (await fs.pathExists(commandsPath)) {
+            console.log('📦 Loading commands from GitHub...')
+            usingGitHub = true
+        } else {
+            console.log('📁 GitHub commands not found, trying local commands directory...')
             commandsPath = path.join(__dirname, 'commands')
         }
 
         if (!await fs.pathExists(commandsPath)) {
-            console.log('Commands directory not found, creating basic commands...')
+            console.log('❌ No commands directory found, creating basic commands...')
             
-            // Create a basic ping command
+            // Create local commands directory with basic command
+            commandsPath = path.join(__dirname, 'commands')
+            await fs.ensureDir(commandsPath)
+            
             const basicCommand = `
 module.exports = {
     command: 'ping',
     description: 'Check if bot is working',
     handler: async (sock, messageInfo) => {
-        await messageInfo.reply('🏓 Pong! Bot is working!')
+        await messageInfo.reply('🏓 Pong! Bot is working!\\n\\n📍 Commands loaded from: ${usingGitHub ? 'GitHub Repository' : 'Local Directory'}')
+    }
+}
+
+module.exports.help = {
+    command: 'help',
+    description: 'Show available commands',
+    handler: async (sock, messageInfo) => {
+        const helpText = \`🤖 *Firekid Bot Commands*
+
+📌 Available Commands:
+• ping - Test if bot is working
+• help - Show this help message
+
+💡 Add more commands to the commands directory!
+\`
+        await messageInfo.reply(helpText)
     }
 }
 `
-            await fs.ensureDir(commandsPath)
-            await fs.writeFile(path.join(commandsPath, 'ping.js'), basicCommand)
-            console.log('Created basic ping command')
+            await fs.writeFile(path.join(commandsPath, 'basic.js'), basicCommand)
+            console.log('✅ Created basic commands')
         }
 
         const files = await fs.readdir(commandsPath)
         const jsFiles = files.filter(file => file.endsWith('.js'))
         
+        console.log(`📂 Found ${jsFiles.length} command files`)
+        
         for (const file of jsFiles) {
             try {
-                delete require.cache[path.resolve(commandsPath, file)]
-                const command = require(path.resolve(commandsPath, file))
+                const fullPath = path.resolve(commandsPath, file)
+                delete require.cache[fullPath]
+                const command = require(fullPath)
                 
                 if (command.command && command.handler) {
                     commands[command.command] = command
-                    console.log(`Loaded command: ${command.command}`)
+                    console.log(`✅ Loaded command: ${command.command}`)
+                } else if (typeof command === 'object') {
+                    // Handle multiple commands in one file
+                    Object.keys(command).forEach(key => {
+                        if (command[key].command && command[key].handler) {
+                            commands[command[key].command] = command[key]
+                            console.log(`✅ Loaded command: ${command[key].command}`)
+                        }
+                    })
                 } else if (typeof command === 'function') {
                     // Handle function exports
                     const commandName = path.basename(file, '.js')
                     commands[commandName] = { handler: command }
-                    console.log(`Loaded command: ${commandName}`)
+                    console.log(`✅ Loaded command: ${commandName}`)
                 }
             } catch (error) {
-                console.log(`Error loading ${file}:`, error.message)
+                console.log(`❌ Error loading ${file}:`, error.message)
             }
         }
         
         // Clean up temp directory if it was used
-        if (commandsPath.includes('temp_commands')) {
-            await fs.remove(path.join(__dirname, 'temp_commands'))
+        if (usingGitHub) {
+            try {
+                await fs.remove(path.join(__dirname, 'temp_commands'))
+                console.log('🧹 Cleaned up temporary files')
+            } catch (e) {
+                console.log('⚠️ Could not clean temp files')
+            }
         }
         
     } catch (error) {
-        console.log('Error loading commands:', error.message)
+        console.log('❌ Error loading commands:', error.message)
     }
     
+    console.log(`🎯 Total commands loaded: ${Object.keys(commands).length}`)
     return commands
 }
 

@@ -277,9 +277,16 @@ module.exports.help = {
             
             Object.keys(commandIndex).forEach(key => {
                 const commandModule = commandIndex[key]
-                if (commandModule && typeof commandModule === 'object' && commandModule.command) {
-                    commands[commandModule.command] = commandModule
-                    console.log(`✅ Loaded command: ${commandModule.command}`)
+                if (commandModule && typeof commandModule === 'object') {
+                    // Clear the cache for the individual command module
+                    const commandPath = path.resolve(commandsPath, `./${key}.js`)
+                    delete require.cache[commandPath]
+                    
+                    const actualCommand = require(commandPath)
+                    if (actualCommand && actualCommand.command && actualCommand.handler) {
+                        commands[actualCommand.command] = actualCommand
+                        console.log(`✅ Loaded command: ${actualCommand.command}`)
+                    }
                 }
             })
         } else {

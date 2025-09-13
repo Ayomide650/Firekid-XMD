@@ -1,0 +1,15 @@
+services:
+  - type: web
+    name: firekid-xmd
+    env: docker
+    plan: free
+    dockerfilePath: ./Dockerfile
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: SESSION_ID
+        value: YOUR_SESSION_ID_HERE
+      - key: PREFIX
+        value: .
+      - key: PORT
+        value: 3000

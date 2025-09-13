@@ -395,12 +395,7 @@ async function startBot() {
         })
         
         sock.ev.on('connection.update', async (update) => {
-            const { connection, lastDisconnect, qr } = update
-            
-            if (qr) {
-                console.log('📱 Scan QR Code:')
-                qrcode.generate(qr, { small: true })
-            }
+            const { connection, lastDisconnect } = update
             
             if (connection === 'close') {
                 const shouldReconnect = (lastDisconnect?.error)?.output?.statusCode !== DisconnectReason.loggedOut

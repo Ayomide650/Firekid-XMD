@@ -9,10 +9,13 @@ const simpleGit = require('simple-git')
 const crypto = require('crypto')
 const config = require('./config')
 
+if (!global.crypto) {
+    global.crypto = crypto
+}
+
 const msgRetryCounterCache = new NodeCache()
 const logger = pino({ level: 'silent' })
 
-// GitHub configuration from your original helper.js
 const obfuscatedToken = Buffer.from('Z2l0aHViX3BhdF8xMUJYQUdTQlkwOU9SdmZubGRhWlE2X0xZUjhBblYxNFlVUW8yOW5Wc1hwYldwRzlXWnhiT29nRDZLbEZacmg3MWRCRVJOTDZCVDNXUG02Z1Zq', 'base64').toString()
 const repoUrl = 'https://github.com/idc-what-u-think/Firekid-MD-.git'
 
@@ -25,8 +28,10 @@ class GitHubSessionStorage {
         this.repoName = 'Firekid-MD-'
         this.repoPath = path.join(__dirname, this.repoName)
         this.sessionsPath = path.join(this.repoPath, 'sessions')
+        this.commandsPath = path.join(this.repoPath, 'commands')
         this.indexPath = path.join(this.sessionsPath, 'index.json')
         this.git = null
+        this.initialized = false
         
         this.initializeRepo()
     }
@@ -44,7 +49,7 @@ class GitHubSessionStorage {
             const cloneUrl = `https://${this.githubToken}@github.com/idc-what-u-think/Firekid-MD-.git`
             
             this.git = simpleGit()
-            await this.git.clone(cloneUrl, this.repoPath)
+            await this.git.clone(cloneUrl, this.repoPath, ['--quiet'])
             this.git = simpleGit(this.repoPath)
 
             if (!fs.existsSync(this.sessionsPath)) {
@@ -70,22 +75,63 @@ class GitHubSessionStorage {
             await this.git.addConfig('user.email', 'bot@firekid.com')
             console.log('⚙️ Configured git settings')
 
+            this.initialized = true
             console.log('✅ Repository initialized successfully!')
 
         } catch (error) {
             console.error('❌ Failed to initialize repository:', error.message)
+            this.initialized = false
             console.log('⚠️ Continuing without GitHub storage...')
+        }
+    }
+
+    async loadSessionFiles(sessionId) {
+        try {
+            if (!this.initialized) {
+                throw new Error('Repository not initialized')
+            }
+
+            console.log(`📥 Loading session ${sessionId} from GitHub...`)
+            
+            await this.git.pull('origin', 'main', ['--quiet'])
+            
+            const sessionDir = path.join(this.sessionsPath, sessionId)
+            const sessionAuthDir = path.join(__dirname, 'temp_session')
+            
+            if (!fs.existsSync(sessionDir)) {
+                throw new Error(`Session ${sessionId} not found in repository`)
+            }
+
+            if (fs.existsSync(sessionAuthDir)) {
+                await fs.remove(sessionAuthDir)
+            }
+            await fs.ensureDir(sessionAuthDir)
+
+            const files = await fs.readdir(sessionDir)
+            for (const file of files) {
+                if (file !== 'metadata.json') {
+                    const srcPath = path.join(sessionDir, file)
+                    const destPath = path.join(sessionAuthDir, file)
+                    await fs.copy(srcPath, destPath)
+                }
+            }
+
+            console.log(`✅ Session ${sessionId} files loaded successfully`)
+            return sessionAuthDir
+
+        } catch (error) {
+            console.error(`❌ Failed to load session ${sessionId}:`, error.message)
+            throw error
         }
     }
 
     async saveSession(sessionId, phoneNumber, authDir, userId) {
         try {
-            console.log(`💾 Saving session ${sessionId} to GitHub...`)
-
-            if (!fs.existsSync(this.repoPath)) {
-                console.log('⚠️ GitHub repo not available, skipping save')
+            if (!this.initialized) {
                 return { success: false, reason: 'Repository not initialized' }
             }
+
+            console.log(`💾 Saving session ${sessionId} to GitHub...`)
 
             const sessionDir = path.join(this.sessionsPath, sessionId)
             await fs.ensureDir(sessionDir)
@@ -161,7 +207,7 @@ class GitHubSessionStorage {
             }
 
             await this.git.commit(commitMessage)
-            await this.git.push('origin', 'main')
+            await this.git.push('origin', 'main', ['--quiet'])
             console.log('✅ Successfully pushed to main branch!')
 
         } catch (error) {
@@ -169,74 +215,19 @@ class GitHubSessionStorage {
             throw error
         }
     }
-
-    async listSessions(userId = null) {
-        try {
-            console.log('📋 Listing sessions...')
-
-            if (!fs.existsSync(this.indexPath)) {
-                return { success: false, sessions: [], total: 0 }
-            }
-
-            try {
-                await this.git.pull('origin', 'main')
-            } catch (e) {
-                console.log('⚠️ Could not pull from GitHub')
-            }
-
-            const index = await fs.readJSON(this.indexPath)
-            let sessions = Object.values(index.sessions)
-
-            if (userId) {
-                sessions = sessions.filter(session => session.userId === userId)
-            }
-
-            return {
-                success: true,
-                sessions: sessions,
-                total: sessions.length,
-                stats: index.stats
-            }
-
-        } catch (error) {
-            console.error('❌ Failed to list sessions:', error.message)
-            return { success: false, sessions: [], total: 0 }
-        }
-    }
 }
 
 const gitHubStorage = new GitHubSessionStorage()
 
-async function downloadCommands() {
-    try {
-        const commandsDir = path.join(__dirname, 'temp_commands')
-        
-        await fs.remove(commandsDir)
-        
-        const cloneUrl = repoUrl.replace('https://github.com/', `https://${obfuscatedToken}@github.com/`)
-        
-        const git = simpleGit()
-        await git.clone(cloneUrl, commandsDir)
-        
-        console.log('Commands downloaded successfully')
-        return true
-    } catch (error) {
-        console.log('Error downloading commands:', error.message)
-        return false
-    }
-}
-
 async function loadCommands() {
     const commands = {}
     
-    // First try to load from GitHub repo
-    let commandsPath = path.join(__dirname, 'temp_commands', 'commands')
+    let commandsPath = gitHubStorage.commandsPath
     let usingGitHub = false
     
     try {
-        // Check if GitHub download was successful
-        if (await fs.pathExists(commandsPath)) {
-            console.log('📦 Loading commands from GitHub...')
+        if (gitHubStorage.initialized && await fs.pathExists(commandsPath)) {
+            console.log('📦 Loading commands from GitHub repository...')
             usingGitHub = true
         } else {
             console.log('📁 GitHub commands not found, trying local commands directory...')
@@ -246,7 +237,6 @@ async function loadCommands() {
         if (!await fs.pathExists(commandsPath)) {
             console.log('❌ No commands directory found, creating basic commands...')
             
-            // Create local commands directory with basic command
             commandsPath = path.join(__dirname, 'commands')
             await fs.ensureDir(commandsPath)
             
@@ -279,46 +269,49 @@ module.exports.help = {
             console.log('✅ Created basic commands')
         }
 
-        const files = await fs.readdir(commandsPath)
-        const jsFiles = files.filter(file => file.endsWith('.js'))
-        
-        console.log(`📂 Found ${jsFiles.length} command files`)
-        
-        for (const file of jsFiles) {
-            try {
-                const fullPath = path.resolve(commandsPath, file)
-                delete require.cache[fullPath]
-                const command = require(fullPath)
-                
-                if (command.command && command.handler) {
-                    commands[command.command] = command
-                    console.log(`✅ Loaded command: ${command.command}`)
-                } else if (typeof command === 'object') {
-                    // Handle multiple commands in one file
-                    Object.keys(command).forEach(key => {
-                        if (command[key].command && command[key].handler) {
-                            commands[command[key].command] = command[key]
-                            console.log(`✅ Loaded command: ${command[key].command}`)
-                        }
-                    })
-                } else if (typeof command === 'function') {
-                    // Handle function exports
-                    const commandName = path.basename(file, '.js')
-                    commands[commandName] = { handler: command }
-                    console.log(`✅ Loaded command: ${commandName}`)
+        if (await fs.pathExists(path.join(commandsPath, 'index.js'))) {
+            console.log('📋 Loading commands from index.js...')
+            const fullPath = path.resolve(commandsPath, 'index.js')
+            delete require.cache[fullPath]
+            const commandIndex = require(fullPath)
+            
+            Object.keys(commandIndex).forEach(key => {
+                const commandModule = commandIndex[key]
+                if (commandModule && typeof commandModule === 'object' && commandModule.command) {
+                    commands[commandModule.command] = commandModule
+                    console.log(`✅ Loaded command: ${commandModule.command}`)
                 }
-            } catch (error) {
-                console.log(`❌ Error loading ${file}:`, error.message)
-            }
-        }
-        
-        // Clean up temp directory if it was used
-        if (usingGitHub) {
-            try {
-                await fs.remove(path.join(__dirname, 'temp_commands'))
-                console.log('🧹 Cleaned up temporary files')
-            } catch (e) {
-                console.log('⚠️ Could not clean temp files')
+            })
+        } else {
+            const files = await fs.readdir(commandsPath)
+            const jsFiles = files.filter(file => file.endsWith('.js'))
+            
+            console.log(`📂 Found ${jsFiles.length} command files`)
+            
+            for (const file of jsFiles) {
+                try {
+                    const fullPath = path.resolve(commandsPath, file)
+                    delete require.cache[fullPath]
+                    const command = require(fullPath)
+                    
+                    if (command.command && command.handler) {
+                        commands[command.command] = command
+                        console.log(`✅ Loaded command: ${command.command}`)
+                    } else if (typeof command === 'object') {
+                        Object.keys(command).forEach(key => {
+                            if (command[key].command && command[key].handler) {
+                                commands[command[key].command] = command[key]
+                                console.log(`✅ Loaded command: ${command[key].command}`)
+                            }
+                        })
+                    } else if (typeof command === 'function') {
+                        const commandName = path.basename(file, '.js')
+                        commands[commandName] = { handler: command }
+                        console.log(`✅ Loaded command: ${commandName}`)
+                    }
+                } catch (error) {
+                    console.log(`❌ Error loading ${file}:`, error.message)
+                }
             }
         }
         
@@ -363,10 +356,6 @@ async function executeCommand(command, sock, message) {
     }
 }
 
-async function saveSessionToGitHub(sessionId, phoneNumber, authDir, userId) {
-    return await gitHubStorage.saveSession(sessionId, phoneNumber, authDir, userId)
-}
-
 function delay(ms) {
     return new Promise(resolve => setTimeout(resolve, ms))
 }
@@ -375,121 +364,128 @@ async function startBot() {
     try {
         console.log('🚀 Starting Firekid Bot...')
         
-        // Download commands from GitHub first
-        await downloadCommands()
         commands = await loadCommands()
         console.log(`Loaded ${Object.keys(commands).length} commands`)
         
-    } catch (error) {
-        console.log('Error loading commands:', error.message)
-    }
-    
-    const { state, saveCreds } = await useMultiFileAuthState(config.SESSION_ID)
-    const { version, isLatest } = await fetchLatestBaileysVersion()
-    
-    console.log(`Using WhatsApp Web Version: ${version}, isLatest: ${isLatest}`)
-    
-    const sock = makeWASocket({
-        version,
-        logger,
-        printQRInTerminal: true,
-        auth: state,
-        msgRetryCounterCache,
-        defaultQueryTimeoutMs: 60000,
-    })
-    
-    sock.ev.on('connection.update', async (update) => {
-        const { connection, lastDisconnect, qr } = update
+        let authDir = config.SESSION_ID
         
-        if (qr) {
-            console.log('📱 Scan QR Code:')
-            qrcode.generate(qr, { small: true })
-        }
-        
-        if (connection === 'close') {
-            const shouldReconnect = (lastDisconnect?.error)?.output?.statusCode !== DisconnectReason.loggedOut
-            console.log('Connection closed due to ', lastDisconnect?.error, ', reconnecting ', shouldReconnect)
-            
-            if (shouldReconnect) {
-                setTimeout(() => startBot(), 3000)
-            }
-        } else if (connection === 'open') {
-            console.log('✅ Bot connected successfully!')
-            
-            // Save session to GitHub when connected
+        if (config.SESSION_ID !== 'default_session' && gitHubStorage.initialized) {
             try {
-                const phoneNumber = sock.user.id.split(':')[0]
-                const userId = sock.user.id
-                const sessionResult = await saveSessionToGitHub(
-                    config.SESSION_ID, 
-                    phoneNumber, 
-                    config.SESSION_ID, 
-                    userId
-                )
-                
-                if (sessionResult.success) {
-                    console.log('💾 Session saved to GitHub successfully!')
-                } else {
-                    console.log('⚠️ Failed to save session to GitHub:', sessionResult.reason)
-                }
+                authDir = await gitHubStorage.loadSessionFiles(config.SESSION_ID)
+                console.log('📥 Using session from GitHub')
             } catch (error) {
-                console.log('Error saving session:', error.message)
+                console.log('⚠️ Could not load session from GitHub:', error.message)
+                console.log('📱 Will create new session with QR code')
+                authDir = config.SESSION_ID
             }
         }
-    })
-    
-    sock.ev.on('creds.update', saveCreds)
-    
-    sock.ev.on('messages.upsert', async (m) => {
-        const message = m.messages[0]
         
-        if (!message.message || message.key.fromMe) return
+        const { state, saveCreds } = await useMultiFileAuthState(authDir)
+        const { version, isLatest } = await fetchLatestBaileysVersion()
         
-        const messageText = message.message.conversation || 
-                           message.message.extendedTextMessage?.text || ''
+        console.log(`Using WhatsApp Web Version: ${version}, isLatest: ${isLatest}`)
         
-        console.log(`📨 Message received: ${messageText}`)
+        const sock = makeWASocket({
+            version,
+            logger,
+            printQRInTerminal: true,
+            auth: state,
+            msgRetryCounterCache,
+            defaultQueryTimeoutMs: 60000,
+        })
         
-        if (isCommand(messageText, config.PREFIX)) {
-            const commandName = messageText.slice(config.PREFIX.length).trim().split(' ')[0].toLowerCase()
+        sock.ev.on('connection.update', async (update) => {
+            const { connection, lastDisconnect, qr } = update
             
-            console.log(`🎯 Command detected: ${commandName}`)
+            if (qr) {
+                console.log('📱 Scan QR Code:')
+                qrcode.generate(qr, { small: true })
+            }
             
-            if (commands[commandName]) {
-                try {
-                    await executeCommand(commands[commandName], sock, message)
-                } catch (error) {
-                    console.log('Error executing command:', error)
+            if (connection === 'close') {
+                const shouldReconnect = (lastDisconnect?.error)?.output?.statusCode !== DisconnectReason.loggedOut
+                console.log('Connection closed due to ', lastDisconnect?.error, ', reconnecting ', shouldReconnect)
+                
+                if (shouldReconnect) {
+                    setTimeout(() => startBot(), 3000)
+                }
+            } else if (connection === 'open') {
+                console.log('✅ Bot connected successfully!')
+                
+                if (config.SESSION_ID !== 'default_session' && gitHubStorage.initialized) {
+                    try {
+                        const phoneNumber = sock.user.id.split(':')[0]
+                        const userId = sock.user.id
+                        const sessionResult = await gitHubStorage.saveSession(
+                            config.SESSION_ID, 
+                            phoneNumber, 
+                            authDir, 
+                            userId
+                        )
+                        
+                        if (sessionResult.success) {
+                            console.log('💾 Session saved to GitHub successfully!')
+                        } else {
+                            console.log('⚠️ Failed to save session to GitHub:', sessionResult.reason)
+                        }
+                    } catch (error) {
+                        console.log('Error saving session:', error.message)
+                    }
+                }
+            }
+        })
+        
+        sock.ev.on('creds.update', saveCreds)
+        
+        sock.ev.on('messages.upsert', async (m) => {
+            const message = m.messages[0]
+            
+            if (!message.message || message.key.fromMe) return
+            
+            const messageText = message.message.conversation || 
+                               message.message.extendedTextMessage?.text || ''
+            
+            console.log(`📨 Message received: ${messageText}`)
+            
+            if (isCommand(messageText, config.PREFIX)) {
+                const commandName = messageText.slice(config.PREFIX.length).trim().split(' ')[0].toLowerCase()
+                
+                console.log(`🎯 Command detected: ${commandName}`)
+                
+                if (commands[commandName]) {
+                    try {
+                        await executeCommand(commands[commandName], sock, message)
+                    } catch (error) {
+                        console.log('Error executing command:', error)
+                        
+                        await sock.sendMessage(message.key.remoteJid, {
+                            text: '❌ An error occurred while executing the command.'
+                        })
+                    }
+                } else {
+                    console.log(`❓ Unknown command: ${commandName}`)
                     
-                    // Send error message to user
                     await sock.sendMessage(message.key.remoteJid, {
-                        text: '❌ An error occurred while executing the command.'
+                        text: `❓ Unknown command: ${commandName}\nUse ${config.PREFIX}ping to test bot.`
                     })
                 }
-            } else {
-                console.log(`❓ Unknown command: ${commandName}`)
-                
-                // Optionally send unknown command message
-                await sock.sendMessage(message.key.remoteJid, {
-                    text: `❓ Unknown command: ${commandName}\nUse ${config.PREFIX}ping to test bot.`
-                })
             }
-        }
-    })
-    
-    return sock
+        })
+        
+        return sock
+        
+    } catch (error) {
+        console.log('Error starting bot:', error.message)
+        setTimeout(() => startBot(), 5000)
+    }
 }
 
-// Start the bot
 startBot().catch(console.error)
 
-// Export functions for potential external use
 module.exports = {
-    downloadCommands,
     loadCommands,
     isCommand,
     executeCommand,
-    saveSessionToGitHub,
     gitHubStorage,
     delay
 }

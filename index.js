@@ -23,7 +23,12 @@ let commands = {}
 
 class GitHubSessionStorage {
     constructor() {
-        this.githubToken = obfuscatedToken
+        // Decode and clean the token
+        const rawToken = Buffer.from('Z2l0aHViX3BhdF8xMUJYQUdTQlkwOU9SdmZubGRhWlE2X0xZUjhBblYxNFlVUW8yOW5Wc1hwYldwRzlXWnhiT29nRDZLbEZacmg3MWRCRVJOTDZCVDNXUG02Z1Zq', 'base64').toString()
+        
+        // Clean the token - remove any domain suffixes that might be accidentally included
+        this.githubToken = rawToken.replace(/@github\.com$/, '').replace(/@.*$/, '').trim()
+        
         this.repoUrl = repoUrl
         this.repoName = 'Firekid-MD-'
         this.repoPath = path.join(__dirname, this.repoName)
@@ -46,7 +51,17 @@ class GitHubSessionStorage {
             }
 
             console.log('📥 Cloning private repository...')
+            // Construct the clone URL properly
             const cloneUrl = `https://${this.githubToken}@github.com/idc-what-u-think/Firekid-MD-.git`
+            
+            // Debug: Show sanitized URL (hide the actual token)
+            const sanitizedUrl = cloneUrl.replace(this.githubToken, 'GITHUB_TOKEN')
+            console.log('🔗 Clone URL format:', sanitizedUrl)
+            
+            // Validate token format
+            if (!this.githubToken.startsWith('github_pat_') && !this.githubToken.startsWith('ghp_')) {
+                throw new Error('Invalid GitHub token format. Token should start with github_pat_ or ghp_')
+            }
             
             this.git = simpleGit()
             await this.git.clone(cloneUrl, this.repoPath, ['--quiet'])

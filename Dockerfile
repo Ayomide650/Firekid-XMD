@@ -1,9 +1,30 @@
-FROM node:18-alpine
+# Multi-stage build for better security
+FROM node:18-alpine AS builder
 
 WORKDIR /app
 
+# Install git and other build dependencies
+RUN apk add --no-cache git
+
+# Set build arg for GitHub token (only used during build)
+ARG GITHUB_TOKEN
+RUN git config --global user.email "bot@example.com" && \
+    git config --global user.name "Bot"
+
+# Copy package files
+COPY package*.json ./
+COPY .gitmodules ./
+
+# Clone the commands submodule
+RUN git clone https://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@github.com/idc-what-u-think/Firekid-MD-.git commands
+
+# Production stage
+FROM node:18-alpine AS production
+
+WORKDIR /app
+
+# Install runtime dependencies
 RUN apk add --no-cache \
-    git \
     python3 \
     make \
     g++ \
@@ -13,27 +34,17 @@ RUN apk add --no-cache \
     giflib-dev \
     librsvg-dev
 
-# Copy package files first
+# Copy package files
 COPY package*.json ./
 
-# Set build arg for GitHub token
-ARG GITHUB_TOKEN
-ENV GITHUB_TOKEN=${GITHUB_TOKEN}
+# Install production dependencies
+RUN npm install --production && npm cache clean --force
 
-# Initialize git and clone submodule
-COPY .gitmodules ./
-RUN git init && \
-    git config --global user.email "bot@example.com" && \
-    git config --global user.name "Bot" && \
-    git remote add origin https://${GITHUB_TOKEN}@github.com/your-main-repo/your-bot-repo.git || true && \
-    git submodule add https://${GITHUB_TOKEN}@github.com/idc-what-u-think/Firekid-MD-.git commands && \
-    git submodule update --init --recursive
-
-# Install dependencies
-RUN npm install --production
-
-# Copy rest of the application
+# Copy application files
 COPY . .
+
+# Copy commands from builder stage (this removes the git history and token)
+COPY --from=builder /app/commands ./commands
 
 # Create temp sessions directory
 RUN mkdir -p temp_sessions
@@ -46,9 +57,9 @@ ENV PREFIX=.
 EXPOSE 3000
 
 # Create user and set permissions
-RUN addgroup -g 1001 -S nodejs
-RUN adduser -S firekid -u 1001
-RUN chown -R firekid:nodejs /app
+RUN addgroup -g 1001 -S nodejs && \
+    adduser -S firekid -u 1001 -G nodejs && \
+    chown -R firekid:nodejs /app
 
 USER firekid
 

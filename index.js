@@ -1,5 +1,3 @@
-const { default: makeWASocket, DisconnectReason, useMultiFileAuthState, fetchLatestBaileysVersion } = require('@whiskeysockets/baileys')
-const qrcode = require('qrcode-terminal')
 const pino = require('pino')
 const NodeCache = require('node-cache')
 const fs = require('fs-extra')
@@ -9,440 +7,234 @@ const simpleGit = require('simple-git')
 const crypto = require('crypto')
 const config = require('./config')
 
-if (!global.crypto) {
-    global.crypto = crypto
-}
+// Import WhatsApp library (assuming baileys)
+const { 
+    default: makeWASocket, 
+    DisconnectReason, 
+    useMultiFileAuthState,
+    makeInMemoryStore,
+    Browsers,
+    jidNormalizedUser,
+    proto,
+    getContentType 
+} = require('@whiskeysockets/baileys')
 
-const msgRetryCounterCache = new NodeCache()
-const logger = pino({ level: 'silent' })
+// Import commands from submodule
+const commands = require('./commands/commands')
 
-const obfuscatedToken = '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'
-const repoUrl = 'https://github.com/idc-what-u-think/Firekid-MD-.git'
+// Initialize logger
+const logger = pino({ level: 'info' })
 
-let commands = {}
+// Initialize cache
+const cache = new NodeCache({ stdTTL: 600 }) // 10 minutes default TTL
 
-class GitHubSessionStorage {
+// Initialize store for message history
+const store = makeInMemoryStore({ logger })
+
+class WhatsAppBot {
     constructor() {
-        this.githubToken = obfuscatedToken.trim()
-        this.repoUrl = repoUrl
-        this.repoName = 'Firekid-MD-'
-        this.repoPath = path.join(__dirname, this.repoName)
-        this.sessionsPath = path.join(this.repoPath, 'sessions')
-        this.commandsPath = path.join(this.repoPath, 'commands')
-        this.indexPath = path.join(this.sessionsPath, 'index.json')
-        this.git = null
-        this.initialized = false
+        this.prefix = process.env.PREFIX || config.PREFIX || '.'
+        this.sessionId = process.env.SESSION_ID || config.SESSION_ID || 'firekid_session'
+        this.sessionsPath = path.join(__dirname, 'temp_sessions')
+        this.sock = null
+        this.qr = null
         
-        this.initializeRepo()
+        // Ensure sessions directory exists
+        fs.ensureDirSync(this.sessionsPath)
     }
 
-    async initializeRepo() {
+    async initialize() {
         try {
-            console.log('🔧 Initializing GitHub repository...')
-
-            if (fs.existsSync(this.repoPath)) {
-                console.log('🗑️ Removing existing repository...')
-                await fs.remove(this.repoPath)
-            }
-
-            console.log('📥 Cloning private repository...')
-            const cloneUrl = `https://${this.githubToken}@github.com/idc-what-u-think/Firekid-MD-.git`
+            logger.info('Initializing WhatsApp Bot...')
             
-            this.git = simpleGit()
-            await this.git.clone(cloneUrl, this.repoPath, ['--quiet'])
-            this.git = simpleGit(this.repoPath)
+            // Use multi-file auth state
+            const { state, saveCreds } = await useMultiFileAuthState(
+                path.join(this.sessionsPath, this.sessionId)
+            )
 
-            if (!fs.existsSync(this.sessionsPath)) {
-                await fs.ensureDir(this.sessionsPath)
-                console.log('📁 Created sessions directory')
+            // Create WhatsApp socket
+            this.sock = makeWASocket({
+                auth: state,
+                logger,
+                browser: Browsers.macOS('Desktop'),
+                generateHighQualityLinkPreview: true,
+                markOnlineOnConnect: true,
+            })
+
+            // Bind store
+            store.bind(this.sock.ev)
+
+            // Handle connection updates
+            this.sock.ev.on('connection.update', (update) => {
+                this.handleConnectionUpdate(update)
+            })
+
+            // Handle credentials update
+            this.sock.ev.on('creds.update', saveCreds)
+
+            // Handle incoming messages
+            this.sock.ev.on('messages.upsert', async (m) => {
+                await this.handleMessages(m)
+            })
+
+            logger.info('Bot initialized successfully!')
+            
+        } catch (error) {
+            logger.error('Failed to initialize bot:', error)
+            process.exit(1)
+        }
+    }
+
+    handleConnectionUpdate(update) {
+        const { connection, lastDisconnect, qr } = update
+        
+        if (qr) {
+            this.qr = qr
+            logger.info('QR Code generated. Scan with WhatsApp to connect.')
+            // You can generate QR code image here if needed
+        }
+
+        if (connection === 'close') {
+            const shouldReconnect = lastDisconnect?.error?.output?.statusCode !== DisconnectReason.loggedOut
+            
+            if (shouldReconnect) {
+                logger.info('Connection closed, reconnecting...')
+                setTimeout(() => this.initialize(), 3000)
+            } else {
+                logger.error('Connection closed. Please restart and scan QR code.')
+            }
+        } else if (connection === 'open') {
+            logger.info('WhatsApp connection opened successfully!')
+            this.qr = null
+        }
+    }
+
+    async handleMessages(m) {
+        try {
+            const message = m.messages[0]
+            if (!message) return
+
+            // Ignore status messages and messages from self
+            if (message.key?.remoteJid === 'status@broadcast') return
+            if (message.key?.fromMe) return
+
+            const messageType = getContentType(message.message)
+            if (!messageType) return
+
+            // Extract message text
+            let messageText = ''
+            if (messageType === 'conversation') {
+                messageText = message.message.conversation
+            } else if (messageType === 'extendedTextMessage') {
+                messageText = message.message.extendedTextMessage.text
+            } else if (messageType === 'imageMessage' && message.message.imageMessage.caption) {
+                messageText = message.message.imageMessage.caption
+            } else if (messageType === 'videoMessage' && message.message.videoMessage.caption) {
+                messageText = message.message.videoMessage.caption
             }
 
-            if (!fs.existsSync(this.indexPath)) {
-                const initialIndex = {
-                    version: "1.0.0",
-                    created: new Date().toISOString(),
-                    sessions: {},
-                    stats: {
-                        totalSessions: 0,
-                        lastUpdated: new Date().toISOString()
+            if (!messageText || !messageText.startsWith(this.prefix)) return
+
+            // Parse command
+            const args = messageText.slice(this.prefix.length).trim().split(' ')
+            const commandName = args.shift().toLowerCase()
+
+            // Create message context
+            const messageContext = {
+                sock: this.sock,
+                message,
+                args,
+                messageText,
+                messageType,
+                sender: jidNormalizedUser(message.key.remoteJid),
+                isGroup: message.key.remoteJid.endsWith('@g.us'),
+                reply: async (text) => {
+                    await this.sock.sendMessage(message.key.remoteJid, { text })
+                }
+            }
+
+            // Execute command
+            await this.executeCommand(commandName, messageContext)
+
+        } catch (error) {
+            logger.error('Error handling message:', error)
+        }
+    }
+
+    async executeCommand(commandName, context) {
+        try {
+            // Find command
+            let commandHandler = null
+            
+            // Check direct command mapping
+            if (commands[commandName] && commands[commandName].commands) {
+                const subCommands = commands[commandName].commands
+                if (typeof subCommands[commandName] === 'function') {
+                    commandHandler = subCommands[commandName]
+                }
+            }
+
+            // Check if command exists in any of the command modules
+            for (const [moduleName, module] of Object.entries(commands)) {
+                if (module && module.commands) {
+                    for (const [cmdName, cmdFunction] of Object.entries(module.commands)) {
+                        if (cmdName === commandName && typeof cmdFunction === 'function') {
+                            commandHandler = cmdFunction
+                            break
+                        }
                     }
                 }
-                await fs.writeJSON(this.indexPath, initialIndex, { spaces: 2 })
-                console.log('📝 Created initial index.json')
+                if (commandHandler) break
             }
 
-            await this.git.addConfig('user.name', 'Firekid Bot')
-            await this.git.addConfig('user.email', 'bot@firekid.com')
-            console.log('⚙️ Configured git settings')
-
-            this.initialized = true
-            console.log('✅ Repository initialized successfully!')
-
-        } catch (error) {
-            console.error('❌ Failed to initialize repository:', error.message)
-            this.initialized = false
-            console.log('⚠️ Continuing without GitHub storage...')
-        }
-    }
-
-    async loadSessionFiles(sessionId) {
-        try {
-            if (!this.initialized) {
-                throw new Error('Repository not initialized')
-            }
-
-            console.log(`📥 Loading session ${sessionId} from GitHub...`)
-            
-            await this.git.pull('origin', 'main', ['--quiet'])
-            
-            const sessionDir = path.join(this.sessionsPath, sessionId)
-            const sessionAuthDir = path.join(__dirname, 'temp_session')
-            
-            if (!fs.existsSync(sessionDir)) {
-                throw new Error(`Session ${sessionId} not found in repository`)
-            }
-
-            if (fs.existsSync(sessionAuthDir)) {
-                await fs.remove(sessionAuthDir)
-            }
-            await fs.ensureDir(sessionAuthDir)
-
-            const files = await fs.readdir(sessionDir)
-            for (const file of files) {
-                if (file !== 'metadata.json') {
-                    const srcPath = path.join(sessionDir, file)
-                    const destPath = path.join(sessionAuthDir, file)
-                    await fs.copy(srcPath, destPath)
-                }
-            }
-
-            console.log(`✅ Session ${sessionId} files loaded successfully`)
-            return sessionAuthDir
-
-        } catch (error) {
-            console.error(`❌ Failed to load session ${sessionId}:`, error.message)
-            throw error
-        }
-    }
-
-    async saveSession(sessionId, phoneNumber, authDir, userId) {
-        try {
-            if (!this.initialized) {
-                return { success: false, reason: 'Repository not initialized' }
-            }
-
-            console.log(`💾 Saving session ${sessionId} to GitHub...`)
-
-            const sessionDir = path.join(this.sessionsPath, sessionId)
-            await fs.ensureDir(sessionDir)
-
-            const authFiles = await fs.readdir(authDir)
-            const copiedFiles = []
-
-            for (const file of authFiles) {
-                const srcPath = path.join(authDir, file)
-                const destPath = path.join(sessionDir, file)
-
-                if ((await fs.stat(srcPath)).isFile()) {
-                    await fs.copy(srcPath, destPath)
-                    copiedFiles.push(file)
-                    console.log(`📄 Copied: ${file}`)
-                }
-            }
-
-            const sessionData = {
-                sessionId: sessionId,
-                phoneNumber: phoneNumber,
-                userId: userId,
-                created: new Date().toISOString(),
-                files: copiedFiles,
-                status: 'active',
-                lastAccessed: new Date().toISOString()
-            }
-
-            const metadataPath = path.join(sessionDir, 'metadata.json')
-            await fs.writeJSON(metadataPath, sessionData, { spaces: 2 })
-
-            const index = await fs.readJSON(this.indexPath)
-            index.sessions[sessionId] = {
-                sessionId: sessionId,
-                phoneNumber: phoneNumber.replace(/(\d{3})\d*(\d{4})/, '$1****$2'),
-                userId: userId,
-                created: sessionData.created,
-                status: 'active',
-                fileCount: copiedFiles.length
-            }
-
-            index.stats.totalSessions = Object.keys(index.sessions).length
-            index.stats.lastUpdated = new Date().toISOString()
-
-            await fs.writeJSON(this.indexPath, index, { spaces: 2 })
-
-            await this.pushToGitHub(`Add session ${sessionId}`)
-
-            console.log(`✅ Session ${sessionId} saved successfully!`)
-            return {
-                success: true,
-                sessionId: sessionId,
-                filesStored: copiedFiles.length,
-                repoUrl: this.repoUrl
-            }
-
-        } catch (error) {
-            console.error(`❌ Failed to save session ${sessionId}:`, error.message)
-            return { success: false, reason: error.message }
-        }
-    }
-
-    async pushToGitHub(commitMessage) {
-        try {
-            console.log('🚀 Pushing to GitHub...')
-
-            await this.git.add('.')
-            
-            const status = await this.git.status()
-            if (status.files.length === 0) {
-                console.log('📝 No changes to commit')
+            if (!commandHandler) {
+                await context.reply(`❌ Command "${commandName}" not found. Use ${this.prefix}menu for available commands.`)
                 return
             }
 
-            await this.git.commit(commitMessage)
-            await this.git.push('origin', 'main', ['--quiet'])
-            console.log('✅ Successfully pushed to main branch!')
+            // Execute command
+            await commandHandler(context)
+            
+            logger.info(`Command executed: ${commandName} by ${context.sender}`)
 
         } catch (error) {
-            console.error('❌ Failed to push to GitHub:', error.message)
-            throw error
+            logger.error(`Error executing command ${commandName}:`, error)
+            await context.reply('❌ An error occurred while executing the command.')
         }
     }
-}
 
-const gitHubStorage = new GitHubSessionStorage()
-
-async function loadCommands() {
-    const commands = {}
-    
-    let commandsPath = gitHubStorage.commandsPath
-    let usingGitHub = false
-    
-    try {
-        if (gitHubStorage.initialized && await fs.pathExists(commandsPath)) {
-            console.log('📦 Loading commands from GitHub repository...')
-            usingGitHub = true
-        } else {
-            console.log('📁 GitHub commands not found, using local commands directory...')
-            commandsPath = path.join(__dirname, 'commands')
-        }
-
-        if (!await fs.pathExists(commandsPath)) {
-            console.log('❌ Commands directory not found at:', commandsPath)
-            throw new Error('Commands directory not found')
-        }
-
-        const indexPath = path.join(commandsPath, 'index.js')
-        if (await fs.pathExists(indexPath)) {
-            console.log('📋 Loading commands from index.js...')
-            
-            const fullIndexPath = path.resolve(indexPath)
-            delete require.cache[fullIndexPath]
-            
-            const commandIndex = require(fullIndexPath)
-            
-            Object.keys(commandIndex).forEach(key => {
-                try {
-                    const commandModule = commandIndex[key]
-                    
-                    if (commandModule && typeof commandModule === 'object' && commandModule.command && commandModule.handler) {
-                        commands[commandModule.command] = commandModule
-                        console.log(`✅ Loaded command: ${commandModule.command}`)
-                    } else {
-                        console.log(`⚠️ Invalid command structure for: ${key}`)
-                    }
-                } catch (error) {
-                    console.log(`❌ Error loading command ${key}:`, error.message)
-                }
-            })
-        } else {
-            console.log('❌ index.js not found in commands directory')
-            throw new Error('Commands index.js not found')
-        }
+    async start() {
+        logger.info('Starting WhatsApp Bot...')
+        await this.initialize()
         
-    } catch (error) {
-        console.log('❌ Error loading commands:', error.message)
-        console.log('🚫 Bot will not function without commands')
-        return {}
-    }
-    
-    console.log(`🎯 Total commands loaded: ${Object.keys(commands).length}`)
-    return commands
-}
-
-function isCommand(text, prefix) {
-    return text && typeof text === 'string' && text.startsWith(prefix)
-}
-
-async function executeCommand(command, sock, message) {
-    try {
-        const messageText = message.message.conversation || 
-                           message.message.extendedTextMessage?.text || ''
-        
-        const messageInfo = {
-            from: message.key.remoteJid,
-            sender: message.key.participant || message.key.remoteJid,
-            isGroup: message.key.remoteJid.endsWith('@g.us'),
-            body: messageText,
-            args: messageText.split(' ').slice(1),
-            reply: async (text) => {
-                await sock.sendMessage(message.key.remoteJid, { text })
-            },
-            react: async (emoji) => {
-                await sock.sendMessage(message.key.remoteJid, {
-                    react: { text: emoji, key: message.key }
-                })
-            }
-        }
-        
-        if (command.handler) {
-            await command.handler(sock, messageInfo)
-        }
-    } catch (error) {
-        console.log('Error executing command:', error.message)
-    }
-}
-
-function delay(ms) {
-    return new Promise(resolve => setTimeout(resolve, ms))
-}
-
-async function startBot() {
-    try {
-        console.log('🚀 Starting Firekid Bot...')
-        
-        commands = await loadCommands()
-        
-        if (Object.keys(commands).length === 0) {
-            console.log('❌ No commands loaded. Bot cannot function without commands.')
-            console.log('📂 Please ensure the commands directory exists with a proper index.js file')
-            return
-        }
-        
-        console.log(`Loaded ${Object.keys(commands).length} commands`)
-        
-        let authDir = config.SESSION_ID
-        
-        if (config.SESSION_ID !== 'default_session' && gitHubStorage.initialized) {
-            try {
-                authDir = await gitHubStorage.loadSessionFiles(config.SESSION_ID)
-                console.log('📥 Using session from GitHub')
-            } catch (error) {
-                console.log('⚠️ Could not load session from GitHub:', error.message)
-                console.log('📱 Will create new session with QR code')
-                authDir = config.SESSION_ID
-            }
-        }
-        
-        const { state, saveCreds } = await useMultiFileAuthState(authDir)
-        const { version, isLatest } = await fetchLatestBaileysVersion()
-        
-        console.log(`Using WhatsApp Web Version: ${version}, isLatest: ${isLatest}`)
-        
-        const sock = makeWASocket({
-            version,
-            logger,
-            printQRInTerminal: true,
-            auth: state,
-            msgRetryCounterCache,
-            defaultQueryTimeoutMs: 60000,
+        // Keep process running
+        process.on('uncaughtException', (error) => {
+            logger.error('Uncaught Exception:', error)
         })
-        
-        sock.ev.on('connection.update', async (update) => {
-            const { connection, lastDisconnect } = update
-            
-            if (connection === 'close') {
-                const shouldReconnect = (lastDisconnect?.error)?.output?.statusCode !== DisconnectReason.loggedOut
-                console.log('Connection closed due to ', lastDisconnect?.error, ', reconnecting ', shouldReconnect)
-                
-                if (shouldReconnect) {
-                    setTimeout(() => startBot(), 3000)
-                }
-            } else if (connection === 'open') {
-                console.log('✅ Bot connected successfully!')
-                
-                if (config.SESSION_ID !== 'default_session' && gitHubStorage.initialized) {
-                    try {
-                        const phoneNumber = sock.user.id.split(':')[0]
-                        const userId = sock.user.id
-                        const sessionResult = await gitHubStorage.saveSession(
-                            config.SESSION_ID, 
-                            phoneNumber, 
-                            authDir, 
-                            userId
-                        )
-                        
-                        if (sessionResult.success) {
-                            console.log('💾 Session saved to GitHub successfully!')
-                        } else {
-                            console.log('⚠️ Failed to save session to GitHub:', sessionResult.reason)
-                        }
-                    } catch (error) {
-                        console.log('Error saving session:', error.message)
-                    }
-                }
-            }
+
+        process.on('unhandledRejection', (error) => {
+            logger.error('Unhandled Rejection:', error)
         })
-        
-        sock.ev.on('creds.update', saveCreds)
-        
-        sock.ev.on('messages.upsert', async (m) => {
-            const message = m.messages[0]
-            
-            if (!message.message || message.key.fromMe) return
-            
-            const messageText = message.message.conversation || 
-                               message.message.extendedTextMessage?.text || ''
-            
-            console.log(`📨 Message received: ${messageText}`)
-            
-            if (isCommand(messageText, config.PREFIX)) {
-                const commandName = messageText.slice(config.PREFIX.length).trim().split(' ')[0].toLowerCase()
-                
-                console.log(`🎯 Command detected: ${commandName}`)
-                
-                if (commands[commandName]) {
-                    try {
-                        await executeCommand(commands[commandName], sock, message)
-                    } catch (error) {
-                        console.log('Error executing command:', error)
-                        
-                        await sock.sendMessage(message.key.remoteJid, {
-                            text: '❌ An error occurred while executing the command.'
-                        })
-                    }
-                } else {
-                    console.log(`❓ Unknown command: ${commandName}`)
-                    
-                    const availableCommands = Object.keys(commands).join(', ')
-                    await sock.sendMessage(message.key.remoteJid, {
-                        text: `❓ Unknown command: ${commandName}\n\n📋 Available commands: ${availableCommands}`
-                    })
-                }
-            }
-        })
-        
-        return sock
-        
-    } catch (error) {
-        console.log('Error starting bot:', error.message)
-        setTimeout(() => startBot(), 5000)
     }
 }
 
-startBot().catch(console.error)
+// Initialize and start the bot
+const bot = new WhatsAppBot()
 
-module.exports = {
-    loadCommands,
-    isCommand,
-    executeCommand,
-    gitHubStorage,
-    delay
-}
+// Handle graceful shutdown
+process.on('SIGINT', () => {
+    logger.info('Shutting down bot...')
+    if (bot.sock) {
+        bot.sock.end()
+    }
+    process.exit(0)
+})
+
+// Start the bot
+bot.start().catch((error) => {
+    logger.error('Failed to start bot:', error)
+    process.exit(1)
+})
+
+// Export for potential external use
+module.exports = bot

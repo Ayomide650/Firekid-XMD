@@ -226,104 +226,57 @@ async function loadCommands() {
     let usingGitHub = false
     
     try {
+        // Try loading from GitHub repository first
         if (gitHubStorage.initialized && await fs.pathExists(commandsPath)) {
             console.log('📦 Loading commands from GitHub repository...')
             usingGitHub = true
         } else {
-            console.log('📁 GitHub commands not found, trying local commands directory...')
+            console.log('📁 GitHub commands not found, using local commands directory...')
             commandsPath = path.join(__dirname, 'commands')
         }
 
+        // Check if commands directory exists
         if (!await fs.pathExists(commandsPath)) {
-            console.log('❌ No commands directory found, creating basic commands...')
-            
-            commandsPath = path.join(__dirname, 'commands')
-            await fs.ensureDir(commandsPath)
-            
-            const basicCommand = `
-module.exports = {
-    command: 'ping',
-    description: 'Check if bot is working',
-    handler: async (sock, messageInfo) => {
-        await messageInfo.reply('🏓 Pong! Bot is working!\\n\\n📍 Commands loaded from: ${usingGitHub ? 'GitHub Repository' : 'Local Directory'}')
-    }
-}
-
-module.exports.help = {
-    command: 'help',
-    description: 'Show available commands',
-    handler: async (sock, messageInfo) => {
-        const helpText = \`🤖 *Firekid Bot Commands*
-
-📌 Available Commands:
-• ping - Test if bot is working
-• help - Show this help message
-
-💡 Add more commands to the commands directory!
-\`
-        await messageInfo.reply(helpText)
-    }
-}
-`
-            await fs.writeFile(path.join(commandsPath, 'basic.js'), basicCommand)
-            console.log('✅ Created basic commands')
+            console.log('❌ Commands directory not found at:', commandsPath)
+            throw new Error('Commands directory not found')
         }
 
-        if (await fs.pathExists(path.join(commandsPath, 'index.js'))) {
+        // Check for index.js in commands directory
+        const indexPath = path.join(commandsPath, 'index.js')
+        if (await fs.pathExists(indexPath)) {
             console.log('📋 Loading commands from index.js...')
-            const fullPath = path.resolve(commandsPath, 'index.js')
-            delete require.cache[fullPath]
-            const commandIndex = require(fullPath)
             
+            // Clear the cache for the index file
+            const fullIndexPath = path.resolve(indexPath)
+            delete require.cache[fullIndexPath]
+            
+            // Load the command index
+            const commandIndex = require(fullIndexPath)
+            
+            // Load each command from the index
             Object.keys(commandIndex).forEach(key => {
-                const commandModule = commandIndex[key]
-                if (commandModule && typeof commandModule === 'object') {
-                    // Clear the cache for the individual command module
-                    const commandPath = path.resolve(commandsPath, `./${key}.js`)
-                    delete require.cache[commandPath]
+                try {
+                    const commandModule = commandIndex[key]
                     
-                    const actualCommand = require(commandPath)
-                    if (actualCommand && actualCommand.command && actualCommand.handler) {
-                        commands[actualCommand.command] = actualCommand
-                        console.log(`✅ Loaded command: ${actualCommand.command}`)
+                    if (commandModule && typeof commandModule === 'object' && commandModule.command && commandModule.handler) {
+                        commands[commandModule.command] = commandModule
+                        console.log(`✅ Loaded command: ${commandModule.command}`)
+                    } else {
+                        console.log(`⚠️ Invalid command structure for: ${key}`)
                     }
+                } catch (error) {
+                    console.log(`❌ Error loading command ${key}:`, error.message)
                 }
             })
         } else {
-            const files = await fs.readdir(commandsPath)
-            const jsFiles = files.filter(file => file.endsWith('.js'))
-            
-            console.log(`📂 Found ${jsFiles.length} command files`)
-            
-            for (const file of jsFiles) {
-                try {
-                    const fullPath = path.resolve(commandsPath, file)
-                    delete require.cache[fullPath]
-                    const command = require(fullPath)
-                    
-                    if (command.command && command.handler) {
-                        commands[command.command] = command
-                        console.log(`✅ Loaded command: ${command.command}`)
-                    } else if (typeof command === 'object') {
-                        Object.keys(command).forEach(key => {
-                            if (command[key].command && command[key].handler) {
-                                commands[command[key].command] = command[key]
-                                console.log(`✅ Loaded command: ${command[key].command}`)
-                            }
-                        })
-                    } else if (typeof command === 'function') {
-                        const commandName = path.basename(file, '.js')
-                        commands[commandName] = { handler: command }
-                        console.log(`✅ Loaded command: ${commandName}`)
-                    }
-                } catch (error) {
-                    console.log(`❌ Error loading ${file}:`, error.message)
-                }
-            }
+            console.log('❌ index.js not found in commands directory')
+            throw new Error('Commands index.js not found')
         }
         
     } catch (error) {
         console.log('❌ Error loading commands:', error.message)
+        console.log('🚫 Bot will not function without commands')
+        return {}
     }
     
     console.log(`🎯 Total commands loaded: ${Object.keys(commands).length}`)
@@ -372,6 +325,13 @@ async function startBot() {
         console.log('🚀 Starting Firekid Bot...')
         
         commands = await loadCommands()
+        
+        if (Object.keys(commands).length === 0) {
+            console.log('❌ No commands loaded. Bot cannot function without commands.')
+            console.log('📂 Please ensure the commands directory exists with a proper index.js file')
+            return
+        }
+        
         console.log(`Loaded ${Object.keys(commands).length} commands`)
         
         let authDir = config.SESSION_ID
@@ -467,8 +427,9 @@ async function startBot() {
                 } else {
                     console.log(`❓ Unknown command: ${commandName}`)
                     
+                    const availableCommands = Object.keys(commands).join(', ')
                     await sock.sendMessage(message.key.remoteJid, {
-                        text: `❓ Unknown command: ${commandName}\nUse ${config.PREFIX}ping to test bot.`
+                        text: `❓ Unknown command: ${commandName}\n\n📋 Available commands: ${availableCommands}`
                     })
                 }
             }

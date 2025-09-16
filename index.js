@@ -19,8 +19,34 @@ const {
     getContentType 
 } = require('@whiskeysockets/baileys')
 
-// Import commands from submodule
-const commands = require('./commands')
+// Import commands from submodule - Updated to handle the actual structure
+let commands = {}
+try {
+    commands = require('./commands')
+    console.log('✅ Commands loaded successfully')
+    console.log('📋 Available commands:', Object.keys(commands))
+} catch (error) {
+    console.error('❌ Failed to load commands:', error.message)
+    console.log('📁 Checking commands directory...')
+    
+    // Check if commands directory exists
+    if (fs.existsSync('./commands')) {
+        console.log('✅ Commands directory exists')
+        console.log('📋 Contents:', fs.readdirSync('./commands'))
+        
+        // Check if index.js exists in commands
+        if (fs.existsSync('./commands/index.js')) {
+            console.log('✅ Commands index.js exists')
+        } else {
+            console.log('❌ Commands index.js not found')
+        }
+    } else {
+        console.log('❌ Commands directory does not exist')
+    }
+    
+    // Exit if commands can't be loaded
+    process.exit(1)
+}
 
 // Initialize logger
 const logger = pino({ level: 'info' })
@@ -163,28 +189,12 @@ class WhatsAppBot {
 
     async executeCommand(commandName, context) {
         try {
-            // Find command
+            // Find command - Updated to work with the actual commands structure
             let commandHandler = null
             
-            // Check direct command mapping
-            if (commands[commandName] && commands[commandName].commands) {
-                const subCommands = commands[commandName].commands
-                if (typeof subCommands[commandName] === 'function') {
-                    commandHandler = subCommands[commandName]
-                }
-            }
-
-            // Check if command exists in any of the command modules
-            for (const [moduleName, module] of Object.entries(commands)) {
-                if (module && module.commands) {
-                    for (const [cmdName, cmdFunction] of Object.entries(module.commands)) {
-                        if (cmdName === commandName && typeof cmdFunction === 'function') {
-                            commandHandler = cmdFunction
-                            break
-                        }
-                    }
-                }
-                if (commandHandler) break
+            // Check if command exists directly in commands object
+            if (commands[commandName] && typeof commands[commandName] === 'function') {
+                commandHandler = commands[commandName]
             }
 
             if (!commandHandler) {
@@ -192,8 +202,9 @@ class WhatsAppBot {
                 return
             }
 
-            // Execute command
-            await commandHandler(context)
+            // Execute command - The commands from your repository expect different parameters
+            // Most commands expect (sock, m, args) format based on typical Baileys bot structure
+            await commandHandler(context.sock, context.message, context.args)
             
             logger.info(`Command executed: ${commandName} by ${context.sender}`)
 

@@ -1,0 +1,3 @@
+[submodule "commands"]
+	path = commands
+	url = https://github.com/idc-what-u-think/Firekid-MD-.git

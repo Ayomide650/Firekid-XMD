@@ -16,19 +16,14 @@ if (!global.crypto) {
 const msgRetryCounterCache = new NodeCache()
 const logger = pino({ level: 'silent' })
 
-const obfuscatedToken = Buffer.from('Z2l0aHViX3BhdF8xMUJYQUdTQlkwOU9SdmZubGRhWlE2X0xZUjhBblYxNFlVUW8yOW5Wc1hwYldwRzlXWnhiT29nRDZLbEZacmg3MWRCRVJOTDZCVDNXUG02Z1Zq', 'base64').toString()
+const obfuscatedToken = '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'
 const repoUrl = 'https://github.com/idc-what-u-think/Firekid-MD-.git'
 
 let commands = {}
 
 class GitHubSessionStorage {
     constructor() {
-        // Decode and clean the token
-        const rawToken = Buffer.from('Z2l0aHViX3BhdF8xMUJYQUdTQlkwOU9SdmZubGRhWlE2X0xZUjhBblYxNFlVUW8yOW5Wc1hwYldwRzlXWnhiT29nRDZLbEZacmg3MWRCRVJOTDZCVDNXUG02Z1Zq', 'base64').toString()
-        
-        // Clean the token - remove any domain suffixes that might be accidentally included
-        this.githubToken = rawToken.replace(/@github\.com$/, '').replace(/@.*$/, '').trim()
-        
+        this.githubToken = obfuscatedToken.trim()
         this.repoUrl = repoUrl
         this.repoName = 'Firekid-MD-'
         this.repoPath = path.join(__dirname, this.repoName)
@@ -51,17 +46,7 @@ class GitHubSessionStorage {
             }
 
             console.log('📥 Cloning private repository...')
-            // Construct the clone URL properly
             const cloneUrl = `https://${this.githubToken}@github.com/idc-what-u-think/Firekid-MD-.git`
-            
-            // Debug: Show sanitized URL (hide the actual token)
-            const sanitizedUrl = cloneUrl.replace(this.githubToken, 'GITHUB_TOKEN')
-            console.log('🔗 Clone URL format:', sanitizedUrl)
-            
-            // Validate token format
-            if (!this.githubToken.startsWith('github_pat_') && !this.githubToken.startsWith('ghp_')) {
-                throw new Error('Invalid GitHub token format. Token should start with github_pat_ or ghp_')
-            }
             
             this.git = simpleGit()
             await this.git.clone(cloneUrl, this.repoPath, ['--quiet'])
@@ -241,7 +226,6 @@ async function loadCommands() {
     let usingGitHub = false
     
     try {
-        // Try loading from GitHub repository first
         if (gitHubStorage.initialized && await fs.pathExists(commandsPath)) {
             console.log('📦 Loading commands from GitHub repository...')
             usingGitHub = true
@@ -250,25 +234,20 @@ async function loadCommands() {
             commandsPath = path.join(__dirname, 'commands')
         }
 
-        // Check if commands directory exists
         if (!await fs.pathExists(commandsPath)) {
             console.log('❌ Commands directory not found at:', commandsPath)
             throw new Error('Commands directory not found')
         }
 
-        // Check for index.js in commands directory
         const indexPath = path.join(commandsPath, 'index.js')
         if (await fs.pathExists(indexPath)) {
             console.log('📋 Loading commands from index.js...')
             
-            // Clear the cache for the index file
             const fullIndexPath = path.resolve(indexPath)
             delete require.cache[fullIndexPath]
             
-            // Load the command index
             const commandIndex = require(fullIndexPath)
             
-            // Load each command from the index
             Object.keys(commandIndex).forEach(key => {
                 try {
                     const commandModule = commandIndex[key]

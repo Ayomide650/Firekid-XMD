@@ -20,7 +20,7 @@ const {
 } = require('@whiskeysockets/baileys')
 
 // Import commands from submodule
-const commands = require('./commands/commands')
+const commands = require('./commands')
 
 // Initialize logger
 const logger = pino({ level: 'info' })

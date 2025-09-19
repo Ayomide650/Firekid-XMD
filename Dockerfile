@@ -31,33 +31,31 @@ RUN if [ ! -d "commands" ] || [ -z "$(ls -A commands 2>/dev/null)" ]; then \
 
 RUN if [ -d "commands" ] && [ ! -f "commands/index.js" ]; then \
         echo "Creating commands index.js..." && \
-        cat > commands/index.js << 'EOF'
-const fs = require('fs')
-const path = require('path')
-
-const commands = {}
-
-try {
-    const commandFiles = fs.readdirSync(__dirname).filter(file => 
-        file.endsWith('.js') && file !== 'index.js'
-    )
-
-    for (const file of commandFiles) {
-        const commandName = path.basename(file, '.js')
-        try {
-            const command = require(path.join(__dirname, file))
-            commands[commandName] = command
-            console.log(`✅ Loaded command: ${commandName}`)
-        } catch (error) {
-            console.error(`❌ Failed to load command ${commandName}:`, error.message)
-        }
-    }
-} catch (error) {
-    console.error('Error reading commands directory:', error.message)
-}
-
-module.exports = commands
-EOF
+        echo "const fs = require('fs')" > commands/index.js && \
+        echo "const path = require('path')" >> commands/index.js && \
+        echo "" >> commands/index.js && \
+        echo "const commands = {}" >> commands/index.js && \
+        echo "" >> commands/index.js && \
+        echo "try {" >> commands/index.js && \
+        echo "    const commandFiles = fs.readdirSync(__dirname).filter(file => " >> commands/index.js && \
+        echo "        file.endsWith('.js') && file !== 'index.js'" >> commands/index.js && \
+        echo "    )" >> commands/index.js && \
+        echo "" >> commands/index.js && \
+        echo "    for (const file of commandFiles) {" >> commands/index.js && \
+        echo "        const commandName = path.basename(file, '.js')" >> commands/index.js && \
+        echo "        try {" >> commands/index.js && \
+        echo "            const command = require(path.join(__dirname, file))" >> commands/index.js && \
+        echo "            commands[commandName] = command" >> commands/index.js && \
+        echo "            console.log(\`✅ Loaded command: \${commandName}\`)" >> commands/index.js && \
+        echo "        } catch (error) {" >> commands/index.js && \
+        echo "            console.error(\`❌ Failed to load command \${commandName}:\`, error.message)" >> commands/index.js && \
+        echo "        }" >> commands/index.js && \
+        echo "    }" >> commands/index.js && \
+        echo "} catch (error) {" >> commands/index.js && \
+        echo "    console.error('Error reading commands directory:', error.message)" >> commands/index.js && \
+        echo "}" >> commands/index.js && \
+        echo "" >> commands/index.js && \
+        echo "module.exports = commands" >> commands/index.js; \
     fi
 
 RUN ls -la commands/ && echo "Commands directory contents listed"

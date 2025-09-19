@@ -58,6 +58,30 @@ class WhatsAppBot {
         this.qr = null
         
         fs.ensureDirSync(this.sessionsPath)
+        
+        this.findExistingSession()
+    }
+
+    findExistingSession() {
+        try {
+            if (fs.existsSync(this.sessionsPath)) {
+                const sessions = fs.readdirSync(this.sessionsPath)
+                const validSessions = sessions.filter(session => {
+                    const sessionPath = path.join(this.sessionsPath, session)
+                    const credsPath = path.join(sessionPath, 'creds.json')
+                    return fs.existsSync(credsPath) && fs.statSync(sessionPath).isDirectory()
+                })
+                
+                if (validSessions.length > 0) {
+                    this.sessionId = validSessions[0]
+                    console.log(`✅ Found existing session: ${this.sessionId}`)
+                } else {
+                    console.log(`📝 No valid sessions found, using: ${this.sessionId}`)
+                }
+            }
+        } catch (error) {
+            console.error('Error finding existing session:', error.message)
+        }
     }
 
     async initialize() {

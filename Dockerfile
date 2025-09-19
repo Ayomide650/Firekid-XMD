@@ -23,23 +23,28 @@ RUN if [ ! -d "commands" ] || [ -z "$(ls -A commands 2>/dev/null)" ]; then \
         echo "Commands directory empty or missing, cloning..." && \
         rm -rf commands && \
         git clone https://github.com/idc-what-u-think/Firekid-MD-.git temp_commands && \
-        mv temp_commands commands && \
+        cp -r temp_commands/* commands/ 2>/dev/null || cp -r temp_commands/. commands/ && \
+        rm -rf temp_commands && \
         echo "Commands cloned successfully"; \
     else \
         echo "Commands directory exists and has content"; \
     fi
 
-RUN echo "Checking commands structure..." && \
+RUN echo "Final commands structure:" && \
     ls -la commands/ && \
     if [ -f "commands/index.js" ]; then \
-        echo "✅ Commands index.js exists"; \
+        echo "✅ Commands index.js exists" && \
+        head -10 commands/index.js; \
     else \
         echo "❌ Commands index.js missing"; \
     fi
 
-RUN ls -la commands/ && echo "Commands directory contents listed"
-
 RUN mkdir -p temp_sessions
+
+RUN if [ -d "sessions" ]; then \
+        echo "Moving existing sessions to temp_sessions..." && \
+        cp -r sessions/* temp_sessions/ 2>/dev/null || true; \
+    fi
 
 ENV NODE_ENV=production
 ENV SESSION_ID=firekid_session

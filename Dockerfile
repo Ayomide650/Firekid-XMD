@@ -23,11 +23,16 @@ RUN if [ ! -d "commands" ] || [ -z "$(ls -A commands 2>/dev/null)" ]; then \
         echo "Commands directory empty or missing, cloning..." && \
         rm -rf commands && \
         git clone https://github.com/idc-what-u-think/Firekid-MD-.git temp_commands && \
-        cp -r temp_commands/* commands/ 2>/dev/null || cp -r temp_commands/. commands/ && \
+        mv temp_commands/commands ./commands && \
         rm -rf temp_commands && \
         echo "Commands cloned successfully"; \
     else \
-        echo "Commands directory exists and has content"; \
+        echo "Commands directory exists, checking structure..." && \
+        if [ -d "commands/commands" ] && [ ! -f "commands/index.js" ]; then \
+            echo "Found nested commands, moving up..." && \
+            mv commands/commands/* commands/ && \
+            rmdir commands/commands; \
+        fi; \
     fi
 
 RUN echo "Final commands structure:" && \

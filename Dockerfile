@@ -29,33 +29,12 @@ RUN if [ ! -d "commands" ] || [ -z "$(ls -A commands 2>/dev/null)" ]; then \
         echo "Commands directory exists and has content"; \
     fi
 
-RUN if [ -d "commands" ] && [ ! -f "commands/index.js" ]; then \
-        echo "Creating commands index.js..." && \
-        echo "const fs = require('fs')" > commands/index.js && \
-        echo "const path = require('path')" >> commands/index.js && \
-        echo "" >> commands/index.js && \
-        echo "const commands = {}" >> commands/index.js && \
-        echo "" >> commands/index.js && \
-        echo "try {" >> commands/index.js && \
-        echo "    const commandFiles = fs.readdirSync(__dirname).filter(file => " >> commands/index.js && \
-        echo "        file.endsWith('.js') && file !== 'index.js'" >> commands/index.js && \
-        echo "    )" >> commands/index.js && \
-        echo "" >> commands/index.js && \
-        echo "    for (const file of commandFiles) {" >> commands/index.js && \
-        echo "        const commandName = path.basename(file, '.js')" >> commands/index.js && \
-        echo "        try {" >> commands/index.js && \
-        echo "            const command = require(path.join(__dirname, file))" >> commands/index.js && \
-        echo "            commands[commandName] = command" >> commands/index.js && \
-        echo "            console.log(\`✅ Loaded command: \${commandName}\`)" >> commands/index.js && \
-        echo "        } catch (error) {" >> commands/index.js && \
-        echo "            console.error(\`❌ Failed to load command \${commandName}:\`, error.message)" >> commands/index.js && \
-        echo "        }" >> commands/index.js && \
-        echo "    }" >> commands/index.js && \
-        echo "} catch (error) {" >> commands/index.js && \
-        echo "    console.error('Error reading commands directory:', error.message)" >> commands/index.js && \
-        echo "}" >> commands/index.js && \
-        echo "" >> commands/index.js && \
-        echo "module.exports = commands" >> commands/index.js; \
+RUN echo "Checking commands structure..." && \
+    ls -la commands/ && \
+    if [ -f "commands/index.js" ]; then \
+        echo "✅ Commands index.js exists"; \
+    else \
+        echo "❌ Commands index.js missing"; \
     fi
 
 RUN ls -la commands/ && echo "Commands directory contents listed"

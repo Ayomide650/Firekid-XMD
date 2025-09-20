@@ -56,35 +56,30 @@ const store = makeInMemoryStore({ logger })
 class WhatsAppBot {
     constructor() {
         this.prefix = process.env.PREFIX || config.PREFIX || '.'
-        this.sessionId = process.env.SESSION_ID || config.SESSION_ID || 'firekid_session'
+        this.sessionId = process.env.SESSION_ID || config.SESSION_ID || '687D2F34AA270098'
         this.sessionsPath = path.join(__dirname, 'temp_sessions')
         this.sock = null
         this.qr = null
         
         fs.ensureDirSync(this.sessionsPath)
         
-        this.findExistingSession()
+        this.copySessionFromRepo()
     }
 
-    findExistingSession() {
+    async copySessionFromRepo() {
         try {
-            if (fs.existsSync(this.sessionsPath)) {
-                const sessions = fs.readdirSync(this.sessionsPath)
-                const validSessions = sessions.filter(session => {
-                    const sessionPath = path.join(this.sessionsPath, session)
-                    const credsPath = path.join(sessionPath, 'creds.json')
-                    return fs.existsSync(credsPath) && fs.statSync(sessionPath).isDirectory()
-                })
-                
-                if (validSessions.length > 0) {
-                    this.sessionId = validSessions[0]
-                    console.log(`✅ Found existing session: ${this.sessionId}`)
-                } else {
-                    console.log(`📝 No valid sessions found, using: ${this.sessionId}`)
-                }
+            const repoSessionPath = path.join(__dirname, 'sessions', this.sessionId)
+            const tempSessionPath = path.join(this.sessionsPath, this.sessionId)
+            
+            if (fs.existsSync(repoSessionPath)) {
+                fs.ensureDirSync(tempSessionPath)
+                fs.copySync(repoSessionPath, tempSessionPath)
+                console.log(`✅ Copied session ${this.sessionId} from repository`)
+            } else {
+                console.log(`⚠️ Session ${this.sessionId} not found in repository`)
             }
         } catch (error) {
-            console.error('Error finding existing session:', error.message)
+            console.error('Error copying session from repo:', error.message)
         }
     }
 

@@ -19,10 +19,16 @@ RUN npm install --production
 
 COPY . .
 
+ARG GITHUB_TOKEN
+
+RUN if [ -n "$GITHUB_TOKEN" ]; then \
+        git config --global url."https://${GITHUB_TOKEN}@github.com/".insteadOf "https://github.com/"; \
+    fi
+
 RUN if [ ! -d "commands" ] || [ -z "$(ls -A commands 2>/dev/null)" ]; then \
         echo "Commands directory empty or missing, cloning..." && \
         rm -rf commands && \
-        git clone https://github.com/idc-what-u-think/Firekid-MD-.git temp_commands && \
+        git clone https://github.com/Ayomide650/Firekid-MD-.git temp_commands && \
         mv temp_commands/commands ./commands && \
         rm -rf temp_commands && \
         echo "Commands cloned successfully"; \
@@ -55,10 +61,6 @@ RUN if [ -d "sessions" ]; then \
         echo "Moving existing sessions to temp_sessions..." && \
         cp -r sessions/* temp_sessions/ 2>/dev/null || true; \
     fi
-
-ENV NODE_ENV=production
-ENV SESSION_ID=firekid_session
-ENV PREFIX=.
 
 EXPOSE 3000
 

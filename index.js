@@ -71,12 +71,33 @@ class WhatsAppBot {
             const repoSessionPath = path.join(__dirname, 'sessions', this.sessionId)
             const tempSessionPath = path.join(this.sessionsPath, this.sessionId)
             
+            console.log(`Looking for session at: ${repoSessionPath}`)
+            
             if (fs.existsSync(repoSessionPath)) {
                 fs.ensureDirSync(tempSessionPath)
                 fs.copySync(repoSessionPath, tempSessionPath)
                 console.log(`✅ Copied session ${this.sessionId} from repository`)
+                
+                // Verify the files were copied
+                if (fs.existsSync(path.join(tempSessionPath, 'creds.json'))) {
+                    console.log(`✅ creds.json found in session`)
+                } else {
+                    console.log(`❌ creds.json missing in session`)
+                }
             } else {
                 console.log(`⚠️ Session ${this.sessionId} not found in repository`)
+                console.log(`Available sessions:`)
+                try {
+                    const sessionsDir = path.join(__dirname, 'sessions')
+                    if (fs.existsSync(sessionsDir)) {
+                        const availableSessions = fs.readdirSync(sessionsDir)
+                        console.log(availableSessions)
+                    } else {
+                        console.log(`Sessions directory doesn't exist at: ${sessionsDir}`)
+                    }
+                } catch (error) {
+                    console.log(`Error listing sessions: ${error.message}`)
+                }
             }
         } catch (error) {
             console.error('Error copying session from repo:', error.message)

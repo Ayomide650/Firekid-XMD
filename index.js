@@ -68,32 +68,54 @@ class WhatsAppBot {
 
     async copySessionFromRepo() {
         try {
-            const repoSessionPath = path.join(__dirname, 'sessions', this.sessionId)
+            // Check multiple possible locations for sessions
+            const possibleSessionPaths = [
+                path.join(__dirname, 'sessions', this.sessionId),
+                path.join(__dirname, 'commands', 'sessions', this.sessionId),
+                path.join(__dirname, 'temp_sessions', this.sessionId)
+            ]
+            
             const tempSessionPath = path.join(this.sessionsPath, this.sessionId)
+            let sessionFound = false
             
-            console.log(`Looking for session at: ${repoSessionPath}`)
-            
-            if (fs.existsSync(repoSessionPath)) {
-                fs.ensureDirSync(tempSessionPath)
-                fs.copySync(repoSessionPath, tempSessionPath)
-                console.log(`✅ Copied session ${this.sessionId} from repository`)
+            for (const sessionPath of possibleSessionPaths) {
+                console.log(`Checking for session at: ${sessionPath}`)
                 
-                // Verify the files were copied
-                if (fs.existsSync(path.join(tempSessionPath, 'creds.json'))) {
-                    console.log(`✅ creds.json found in session`)
-                } else {
-                    console.log(`❌ creds.json missing in session`)
+                if (fs.existsSync(sessionPath)) {
+                    console.log(`✅ Found session at: ${sessionPath}`)
+                    fs.ensureDirSync(tempSessionPath)
+                    fs.copySync(sessionPath, tempSessionPath)
+                    console.log(`✅ Copied session ${this.sessionId} to temp_sessions`)
+                    
+                    // Verify the files were copied
+                    if (fs.existsSync(path.join(tempSessionPath, 'creds.json'))) {
+                        console.log(`✅ creds.json found in session`)
+                        sessionFound = true
+                        break
+                    } else {
+                        console.log(`❌ creds.json missing in copied session`)
+                    }
                 }
-            } else {
-                console.log(`⚠️ Session ${this.sessionId} not found in repository`)
+            }
+            
+            if (!sessionFound) {
+                console.log(`⚠️ Session ${this.sessionId} not found in any location`)
                 console.log(`Available sessions:`)
                 try {
+                    // Check commands/sessions directory
+                    const commandsSessionsDir = path.join(__dirname, 'commands', 'sessions')
+                    if (fs.existsSync(commandsSessionsDir)) {
+                        console.log(`In commands/sessions:`)
+                        const availableSessions = fs.readdirSync(commandsSessionsDir)
+                        console.log(availableSessions)
+                    }
+                    
+                    // Check root sessions directory
                     const sessionsDir = path.join(__dirname, 'sessions')
                     if (fs.existsSync(sessionsDir)) {
+                        console.log(`In root sessions:`)
                         const availableSessions = fs.readdirSync(sessionsDir)
                         console.log(availableSessions)
-                    } else {
-                        console.log(`Sessions directory doesn't exist at: ${sessionsDir}`)
                     }
                 } catch (error) {
                     console.log(`Error listing sessions: ${error.message}`)

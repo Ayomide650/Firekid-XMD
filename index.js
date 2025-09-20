@@ -56,7 +56,7 @@ const store = makeInMemoryStore({ logger })
 class WhatsAppBot {
     constructor() {
         this.prefix = process.env.PREFIX || config.PREFIX || '.'
-        this.sessionId = process.env.SESSION_ID || config.SESSION_ID || '687D2F34AA270098'
+        this.sessionId = process.env.SESSION_ID || config.SESSION_ID || 'auto-detect'
         this.sessionsPath = path.join(__dirname, 'temp_sessions')
         this.sock = null
         this.qr = null
@@ -68,6 +68,24 @@ class WhatsAppBot {
 
     async copySessionFromRepo() {
         try {
+            // If sessionId is auto-detect, find the first available session
+            if (this.sessionId === 'auto-detect') {
+                const commandsSessionsDir = path.join(__dirname, 'commands', 'sessions')
+                if (fs.existsSync(commandsSessionsDir)) {
+                    const availableSessions = fs.readdirSync(commandsSessionsDir).filter(item => 
+                        item !== 'index.json' && fs.statSync(path.join(commandsSessionsDir, item)).isDirectory()
+                    )
+                    
+                    if (availableSessions.length > 0) {
+                        this.sessionId = availableSessions[0]
+                        console.log(`🔄 Auto-detected session: ${this.sessionId}`)
+                    } else {
+                        console.log(`❌ No valid sessions found for auto-detection`)
+                        return
+                    }
+                }
+            }
+            
             // Check multiple possible locations for sessions
             const possibleSessionPaths = [
                 path.join(__dirname, 'sessions', this.sessionId),
